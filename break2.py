@@ -78,7 +78,7 @@ def check_app_overdue():
 
             # Check if app_status is not "SUCCESS_DELETE"
             #Include "SUCCESS_UPDATE"
-            if app_status != "SUCCESS_DELETE":
+            if app_status != "SUCCESS_DELETE" or "SUCCESS_UPDATE":
                 print(f"User ID: {user_id}, Display Name: {display_name}, "
                       f"App ID: {app_id}, App Status: {app_status}, "
                       f"Cymmetri Status: {user['status']}, "
