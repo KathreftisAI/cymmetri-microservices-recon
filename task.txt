@@ -1,0 +1,35 @@
+'''
+Task 1 - Loop over all users, get all distinct provisionedApps.<appId>.
+remove CYMMETRI from this list
+
+For each such appId - find in reconciliationPull and reconciliationPush, the 
+corresponding reconId 
+
+such that - 
+
+appId key --> 
+value is a list of dict --> 
+[type:"USER"/"GROUP"] --> [reconId:""] --> [PUSH/PULL] 
+
+
+for each such reconId where type-> USER
+get batchId
+
+Process each such batchId to get corresponding breaktype (push/pull give different breaks)
+
+'''
+
+
+'''
+Task 2- 
+
+For each break instance - 
+
+1. specify which break type
+2. UserId (wherever present in cymmetri or target app or both)
+3. Give other details as necessary -> e.g., if in cymmetri but not target app
+ mention cymmetri login id, and which app was checked
+4. When was this break check run and break was found.
+5. Store in mongodb as collection "recon_break_results" 
+
+'''

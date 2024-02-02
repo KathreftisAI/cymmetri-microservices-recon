@@ -11,44 +11,6 @@ from datetime import datetime
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
 db = client['newqa-recontestsahil'] 
 db_user = client["user"]
-
-
-'''
-Task 1 - Loop over all users, get all distinct provisionedApps.<appId>.
-remove CYMMETRI from this list
-
-For each such appId - find in reconciliationPull and reconciliationPush, the 
-corresponding reconId 
-
-such that - 
-
-appId key --> 
-value is a list of dict --> 
-[type:"USER"/"GROUP"] --> [reconId:""] --> [PUSH/PULL] 
-
-
-for each such reconId where type-> USER
-get batchId
-
-Process each such batchId to get corresponding breaktype (push/pull give different breaks)
-
-'''
-
-
-'''
-Task 2- 
-
-For each break instance - 
-
-1. specify which break type
-2. UserId (wherever present in cymmetri or target app or both)
-3. Give other details as necessary -> e.g., if in cymmetri but not target app
- mention cymmetri login id, and which app was checked
-4. When was this break check run and break was found.
-5. Store in mongodb as collection "recon_break_results" 
-
-'''
-
 pipeline = [
     {
         "$project": {
@@ -235,49 +197,6 @@ print("\n=====Final MongoDB Collection Summary=====\n")
 # Print the details for each missing value
 for details in missing_values_details:
     print(details)
-
-
-
-
-# final_output = []
-
-# for login in missing_values:
-#     # Fetch applicationId from the reconciliationPull collection
-#     reconciliation_pull_record = db.reconciliationPull.find_one({"data.login": login})
-#     if reconciliation_pull_record:
-#         application_id = reconciliation_pull_record.get("applicationId")
-#     else:
-#         application_id = None
-
-#     # Fetch reconUuid, batchId from the syncData collection
-#     sync_data_record = db.syncData.find_one({"data.login": login})
-#     if sync_data_record:
-#         recon_uuid = sync_data_record.get("reconUuid")
-#         batch_id = sync_data_record.get("batchId")
-#     else:
-#         recon_uuid = None
-#         batch_id = None
-
-#     # Create the final output dictionary
-#     output_entry = {
-#         "login": login,
-#         "applicationId": application_id,
-#         "reconUuid": recon_uuid,
-#         "batchId": batch_id,
-#         "PerformedAt": datetime.datetime.utcnow(),
-#         "Break_Type": "Break_1 Account Created Outside Cymmetri"
-#     }
-
-#     # Append the entry to the final_output list
-#     final_output.append(output_entry)
-
-# # Print the final JSON output
-# print("Final Output for missing_values:")
-# print(final_output)
-
-
-
-
 
 # #Close the MongoDB connection
 # client.close()

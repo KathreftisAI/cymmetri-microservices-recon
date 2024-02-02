@@ -1,0 +1,2 @@
+MONGODB_CONNECTION_STRING: "mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority"
+CYMMETRI_DB_PREFIX: newqa-
