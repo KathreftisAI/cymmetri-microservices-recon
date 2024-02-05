@@ -34,7 +34,7 @@ def __sync_collection__(tenant: str):
 
 def __breaktype_collection__(tenant: str):
     #logging.debug(f"Getting collection for tenant: {tenant}")
-    return get_collection(tenant, "Recon_Break_Type")
+    return get_collection(tenant, "recon_break_type")
 
 
 from config.loader import Configuration
@@ -57,7 +57,7 @@ async def get_health_status():
         "health":"running",
         "updated_ts":datetime.now()
     }
-    return Response(code=200,data={},success=True)
+    return Response(code=200,data=response_data,success=True)
 
 @app.get(f"{base_prefix}/break_1")
 async def get_distinct_logins(tenant:str = Header(...)) -> Response:
@@ -139,9 +139,9 @@ async def get_distinct_logins(tenant:str = Header(...)) -> Response:
                 sync_data_details = {
                     "batchId": sync_record.get("batchId"),
                     "reconciliationId": sync_record.get("reconciliationId"),
-                    "login": missing_login,
-                    "Break_Type": "Account created outside Cymmetri",
-                    "PerformedAt": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
+                    "loginId": missing_login,
+                    "breakType": "Account created outside Cymmetri",
+                    "performedAt": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
                 }
                 matching_record_reconciliation_pull = reconciliationPull.find_one({"_id": ObjectId(sync_record.get("reconciliationId"))})
                 if matching_record_reconciliation_pull:
@@ -166,9 +166,36 @@ async def get_distinct_logins(tenant:str = Header(...)) -> Response:
     print("response data: ",response_data)
     
     breaktype_collection = __breaktype_collection__(tenant)
-    print("collection: ",breaktype_collection)
-    breaktype_collection.insert_one(response_data)
-    logging.debug(f"data saved successfully")
+    print("collection: ", breaktype_collection)
+
+    for record in response_data["missing_values_details"]:
+        print("Record:", record)
+
+        # Define the criteria for finding duplicates
+        criteria = {
+            "Break_Type": record["breakType"],
+            "loginId": record["loginId"],
+            "applicationId": record["applicationId"],
+            "reconciliationId": record["reconciliationId"]
+
+        }
+
+        # Define the update operation
+        update_operation = {
+            "$set": {"performedAt": record["performedAt"]}
+        }
+
+        # Try to update the existing document; if it doesn't exist, insert a new one
+        result = breaktype_collection.update_one(criteria, update_operation, upsert=True)
+
+        # Check if the update was successful
+        if result.matched_count > 0:
+            logging.debug(f"Record updated successfully: {criteria}")
+        else:
+            logging.debug(f"Record inserted successfully: {record}")
+
+    #logging.debug(f"Data for login {record['user_login']} saved successfully")
+
 
     return Response(code=200,data={},success=True)
 
