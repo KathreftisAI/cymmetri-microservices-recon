@@ -17,8 +17,7 @@ class Response(BaseModel):
     data: dict
     success: bool
     message: Optional[str] = None
-
-
+    
 live_count = 0
 
 def __user_collection__(tenant: str):
@@ -38,7 +37,29 @@ def __breaktype_collection__(tenant: str):
     return get_collection(tenant, "Recon_Break_Type")
 
 
-@app.get("/break_1")
+from config.loader import Configuration
+import platform
+ 
+def load_configuration():
+    if platform.system() == 'Windows':
+        c = Configuration(r"C:/Users/pace it/Desktop/cymmetri/cymmetri-microservices-recon/config.yaml")
+    else:
+        c = Configuration("/config/config.yaml")
+    return c.getConfiguration()
+ 
+data = load_configuration()
+
+base_prefix = data['BASE_PREFIX']
+
+@app.get(f"{base_prefix}/health")
+async def get_health_status():
+    response_data = {
+        "health":"running",
+        "updated_ts":datetime.now()
+    }
+    return Response(code=200,data={},success=True)
+
+@app.get(f"{base_prefix}/break_1")
 async def get_distinct_logins(tenant:str = Header(...)) -> Response:
 
     user_collection = __user_collection__(tenant)
@@ -163,4 +184,4 @@ async def get_distinct_logins(tenant:str = Header(...)) -> Response:
 
     
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
