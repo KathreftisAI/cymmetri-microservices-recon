@@ -7,7 +7,8 @@ def load_configuration():
     if platform.system() == 'Windows':
         c = Configuration(r"C:/Users/pace it/Desktop/cymmetri/cymmetri-microservices-recon/config.yaml")
     else:
-        c = Configuration("config.yaml")
+        c = Configuration("/config/config.yaml")
+
     return c.getConfiguration()
  
 data = load_configuration()
