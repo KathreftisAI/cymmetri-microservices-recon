@@ -142,7 +142,7 @@ async def get_distinct_logins(tenant: str = Header(...)) -> Response:
         print("Record:", record)
 
         criteria = {
-            "Break_Type": record["breakType"],
+            "breakType": record["breakType"],
             "loginId": record["loginId"],
             "applicationId": record["applicationId"],
             "reconciliationId": record["reconciliationId"]
