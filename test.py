@@ -173,7 +173,7 @@ async def get_distinct_logins(tenant:str = Header(...)) -> Response:
 
         # Define the criteria for finding duplicates
         criteria = {
-            "Break_Type": record["breakType"],
+            "breakType": record["breakType"],
             "loginId": record["loginId"],
             "applicationId": record["applicationId"],
             "reconciliationId": record["reconciliationId"]
@@ -211,4 +211,4 @@ async def get_distinct_logins(tenant:str = Header(...)) -> Response:
 
     
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="127.0.0.1", port=5000)
