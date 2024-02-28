@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Header,BackgroundTasks
+from fastapi import FastAPI, HTTPException, Header
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
@@ -24,7 +24,6 @@ syncData = db["syncData"]
 break_count = db["break_count"]
 recon_break_type = db["recon_break_type"]
 recon_report_metadata = db["recon_report_metadata"]
-trigger_collection = db["trigger_collection"]
 
 app = FastAPI()
 
@@ -129,10 +128,10 @@ def process_missing_values():
     }
     break_count.insert_one(break_count_document)
 
-def watch_trigger_collection():
-    with trigger_collection.watch(full_document='updateLookup') as stream:
+def watch_recon_report_metadata():
+    with recon_report_metadata.watch(full_document='updateLookup') as stream:
         for change in stream:
-            logging.info("Change detected in trigger collection.")
+            logging.info("Change detected in reconReportMetadata collection.")
             process_missing_values()
 
 # FastAPI endpoint (just for example)
@@ -140,23 +139,14 @@ def watch_trigger_collection():
 async def read_root():
     return {"message": "FastAPI is running."}
 
-# Function to insert a document into the trigger collection
-def insert_trigger_document():
-    trigger_collection.insert_one({"trigger": "new_record"})
+# Start the MongoDB change stream in a background task
+import asyncio
+from fastapi import BackgroundTasks
 
-# Background task to watch trigger collection
 @app.on_event("startup")
 async def startup_event():
     background_tasks = BackgroundTasks()
-    background_tasks.add_task(watch_trigger_collection)
-
-# Endpoint to simulate inserting a new record into recon_report_metadata
-@app.post("/insert-record")
-async def insert_record():
-    # Your logic to insert a new record into recon_report_metadata here
-    # After inserting the record, add a trigger document to trigger_collection
-    insert_trigger_document()
-    return {"message": "Record inserted."}
+    background_tasks.add_task(watch_recon_report_metadata)
 
 if __name__ == "__main__":
     # Start the FastAPI application
