@@ -1,167 +1,183 @@
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
+import pytz
 import uvicorn
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 import logging
-from database.connection import get_collection
-from config.loader import Configuration
-import platform
+
+logging.basicConfig(filename='app.log', level=logging.INFO)
+client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
 
 app = FastAPI()
 
-class Response(BaseModel):
-    code: int
-    data: dict
-    success: bool
-    message: str = None
 
-live_count = 0
+def check_app_overdue(app_ids, cymmetri_logins):
+    db = client["cymmetri-datascience"]
+    current_utc_time = datetime.utcnow()
+    print("current_utc_time: ",current_utc_time)
+    matching_users = []
+    messages = []
 
-def load_configuration():
-    if platform.system() == 'Windows':
-        c = Configuration(r"C:/Users/pace it/Desktop/cymmetri/cymmetri-microservices-recon/config.yaml")
-    else:
-        c = Configuration("/config/config.yaml")
-    return c.getConfiguration()
+    for app_id in app_ids:
+        print("app_id: ",app_id)
+        print("appidsssss: ",app_ids)
+        for cymmetri_login in cymmetri_logins:
+            print("cymmetri_login: ",cymmetri_login)
+            users = db.user.find({
+                "end_date": {"$exists": True, "$lt": current_utc_time},
+                "status": "ACTIVE",
+                f"provisionedApps.{app_id}.login.login": cymmetri_login
+            })
+            print("jnjldnenedend")
+            matching_users.extend(users)
+    print("usersssss: ",matching_users)
+    print(len(matching_users))
+    for user in matching_users:
+        user_id = str(user["_id"])
+        display_name = user.get("displayName", "N/A")
+        end_date = user.get("end_date", "N/A")
+        for app_id, app_details in user.get("provisionedApps", {}).items():
+            app_login = app_details.get("login", {}).get("login", "N/A")
+            app_status = app_details.get("login", {}).get("status", "N/A")
 
-data = load_configuration()
-base_prefix = data['BASE_PREFIX']
+            if app_status != "SUCCESS_DELETE" or "SUCCESS_UPDATE":
+                message = (f"User ID: {user_id}, Display Name: {display_name}, "
+                           f"App ID: {app_id}, App Status: {app_status}, "
+                           f"Cymmetri Status: {user['status']}, "
+                           f"End Date: {end_date}, Current Date: {current_utc_time}")
+                messages.append(message)
 
-def __user_collection__(tenant: str):
-    return get_collection(tenant, "user")
+    # Print each message only once
+    for message in messages:
+        print("Break Type:: App_Overdue")
+        print(message)
 
-def __reconciliationPull_collection__(tenant: str):
-    return get_collection(tenant, "reconciliationPull")
 
-def __sync_collection__(tenant: str):
-    return get_collection(tenant, "syncData")
+@app.post("/missing_records")
+async def missing_records(db_name: str = Header("cymmetri-datascience")):
+    # Function to connect to the MongoDB client and return the specified database
+    def connect_to_db(db_name):
+        client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
+        return client[db_name]
 
-def __breaktype_collection__(tenant: str):
-    return get_collection(tenant, "recon_break_type")
+    # Function to get Indian time
+    def get_indian_time():
+        tz = pytz.timezone('Asia/Kolkata')
+        return datetime.now(tz)
 
-@app.get(f"{base_prefix}/health")
-async def get_health_status():
-    response_data = {
-        "health": "running",
-        "updated_ts": datetime.now()
-    }
-    return Response(code=200, data=response_data, success=True)
+    # Function to fetch logins excluding CYMMETRI
+    def fetch_logins_exclude_cymmetri(db):
+        cymmetri_logins = set()
+        app_ids = set()
 
-@app.get(f"{base_prefix}/break_1")
-async def get_distinct_logins(tenant: str = Header(...)) -> Response:
-    user_collection = __user_collection__(tenant)
-    reconciliationPull = __reconciliationPull_collection__(tenant)
-    syncData = __sync_collection__(tenant)
-    breaktype_collection = __breaktype_collection__(tenant)
+        recon_metadata_collection = db['reconReportMetadata']
+        recon_ids = [doc['reconciliationId'] for doc in recon_metadata_collection.find()]
 
-    pipeline = [
-        {"$project": {"provisionedApps": {"$objectToArray": "$provisionedApps"}}},
-        {"$unwind": "$provisionedApps"},
-        {"$group": {"_id": "$provisionedApps.k"}}
-    ]
+        recon_pull_collection = db["reconciliationPull"]
+        user_collection = db["user"]
 
-    try:
-        distinct_apps_user = user_collection.aggregate(pipeline)
-        distinct_app_ids_user = [app['_id'] for app in distinct_apps_user]
+        for recon_id in recon_ids:
+            recon_object_id = ObjectId(recon_id)
+            matching_docs = recon_pull_collection.find({"_id": recon_object_id})
 
-        if "CYMMETRI" in distinct_app_ids_user:
-            distinct_app_ids_user.remove("CYMMETRI")
+            for doc in matching_docs:
+                appId = doc['applicationId']
+                if appId != "CYMMETRI":
+                    app_ids.add(appId)
 
-        matching_records_dict = {}
-        user_type_ids_set = set()
-        user_type_count = {}
-        batch_ids_info = {}
-        distinct_logins_target = set()
-        distinct_logins_from_user = set()
-        missing_values = set()
-        missing_values_details = []
+                    user_docs = user_collection.find({"provisionedApps." + appId + ".login.login": {"$exists": True}})
+                    for user_doc in user_docs:
+                        login_login = user_doc["provisionedApps"][appId]["login"]["login"]
+                        cymmetri_logins.add(login_login)
 
-        for app_id in distinct_app_ids_user:
-            matching_records = reconciliationPull.find({"applicationId": app_id})
-            matching_records_dict[app_id] = [record for record in matching_records]
+        cymmetri_logins_list = list(cymmetri_logins)
+        logging.info("Cymmetri Logins: %s", cymmetri_logins_list)
+        return app_ids, cymmetri_logins_list
 
-            matching_records = reconciliationPull.find({"applicationId": app_id})
-            user_type_ids_set.update(str(record.get('_id')) for record in matching_records if record.get('type') == 'USER')
+    # Function to fetch matching records
+    def fetch_matching_records(db):
+        matching_records = []
+        target_logins = []
 
-            for user_type_id in user_type_ids_set:
-                matching_sync_data = syncData.find({"reconciliationId": user_type_id})
-                count = sum(1 for _ in matching_sync_data)
-                user_type_count[str(user_type_id)] = count
+        recon_metadata_collection = db['reconReportMetadata']
+        sync_data_collection = db['syncDataForRecon']
 
-            for user_type_id in user_type_ids_set:
-                matching_sync_data = syncData.find({"reconciliationId": user_type_id})
-                latest_created_datetime, latest_batch_id = None, None
-                for sync_record in matching_sync_data:
-                    if latest_created_datetime is None or sync_record.get('createdDateTime') > latest_created_datetime:
-                        latest_created_datetime = sync_record.get('createdDateTime')
-                        latest_batch_id = sync_record.get('batchId')
-                batch_ids_info[str(user_type_id)] = {'latest_batch_id': latest_batch_id, 'latest_created_datetime': latest_created_datetime}
+        for recon_metadata_doc in recon_metadata_collection.find():
+            batch_id = recon_metadata_doc.get('batchId')
+            reconciliation_id = recon_metadata_doc.get('reconciliationId')
 
-            for user_type_id, info in batch_ids_info.items():
-                latest_batch_id = info['latest_batch_id']
-                matching_records = syncData.find({"batchId": latest_batch_id}, {"data.login": 1})
-                distinct_logins_target.update(record.get("data", {}).get("login") for record in matching_records)
+            sync_data_docs = sync_data_collection.find({
+                'batchId': batch_id,
+                'reconciliationId': reconciliation_id
+            })
 
-            for app_id in distinct_app_ids_user:
-                matching_records = user_collection.find({"provisionedApps.{}.login.login".format(app_id): {"$exists": True}}, {"provisionedApps.{}.login.login".format(app_id): 1})
-                distinct_logins_from_user.update(record.get("provisionedApps", {}).get(app_id, {}).get("login", {}).get("login") for record in matching_records)
+            for sync_data_doc in sync_data_docs:
+                matching_records.append(sync_data_doc)
+                target_logins.append(sync_data_doc['data']['login'])
 
-        missing_values = distinct_logins_target - distinct_logins_from_user
+        print("Target Logins ", target_logins)
 
-        for missing_login in missing_values:
-            matching_records_sync_data = syncData.find({"data.login": missing_login})
-            for sync_record in matching_records_sync_data:
-                sync_data_details = {
-                    "batchId": sync_record.get("batchId"),
-                    "reconciliationId": sync_record.get("reconciliationId"),
-                    "loginId": missing_login,
-                    "breakType": "Account created outside Cymmetri",
-                    "performedAt": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
+        return matching_records, target_logins
+
+    # Function to insert missing logins into recon_break_type collection
+    def insert_missing_logins(missing_logins, db):
+        sync_data_collection = db['syncDataForRecon']
+        recon_break_type_collection = db['recon_break_type']
+        break_count_collection = db['breakReportMetadata']
+
+        inserted_records_count = 0
+        inserted_object_ids = []
+
+        for index, missing_login in enumerate(missing_logins, start=1):
+            sync_data_doc = sync_data_collection.find_one({'data.login': missing_login})
+
+            if sync_data_doc:
+                batch_id = sync_data_doc.get('batchId')
+                reconciliation_id = sync_data_doc.get('reconciliationId')
+
+                break_doc = {
+                    'batchId': batch_id,
+                    'reconciliationId': reconciliation_id,
+                    'loginId': missing_login,
+                    'breakType': 'Account created outside Cymmetri',
+                    'performedAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
                 }
-                matching_record_reconciliation_pull = reconciliationPull.find_one({"_id": ObjectId(sync_record.get("reconciliationId"))})
-                if matching_record_reconciliation_pull:
-                    sync_data_details["applicationId"] = matching_record_reconciliation_pull.get("applicationId")
-                    missing_values_details.append(sync_data_details)
 
-        response_data = {
-            "missing_values_details": missing_values_details
-        }
+                result = recon_break_type_collection.insert_one(break_doc)
+                inserted_object_ids.append(result.inserted_id)
+                inserted_records_count += 1
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                indian_time = get_indian_time()
+                formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
 
-    print("response data: ", response_data)
+                break_count_document = {
+                    "status": f"{inserted_records_count} new records inserted",
+                    "performedAt": formatted_indian_time,
+                    "objectIDs": inserted_object_ids,
+                    "breakType": break_doc["breakType"]
+                }
+                break_count_collection.insert_one(break_count_document)
 
-    
-    inserted_records_count = 0
+            else:
+                print(f"No syncDataForRecon document found for login: {missing_login}")
 
-    for record in response_data["missing_values_details"]:
-        print("Record:", record)
+            print(f"Processed {index}/{len(missing_logins)} missing logins. {inserted_records_count} records inserted.")
 
-        criteria = {
-            "breakType": record["breakType"],
-            "loginId": record["loginId"],
-            "applicationId": record["applicationId"],
-            "reconciliationId": record["reconciliationId"]
-        }
+        return JSONResponse(content={"message": "Missing records processed successfully."})
 
-        update_operation = {
-            "$set": {"performedAt": record["performedAt"]}
-        }
+    db = connect_to_db(db_name)
+    app_ids, cymmetri_logins = fetch_logins_exclude_cymmetri(db)
+    matching_records, target_logins = fetch_matching_records(db)
+    missing_logins = set(target_logins) - set(cymmetri_logins)
 
-        result = breaktype_collection.update_one(criteria, update_operation, upsert=True)
+    check_app_overdue(app_ids, cymmetri_logins)
 
-        if result.matched_count > 0:
-            logging.debug(f"Record updated successfully: {criteria}")
-        else:
-            logging.debug(f"Record inserted successfully: {record}")
-            inserted_records_count += 1
-            print(f"{inserted_records_count} record inserted successfully in mongoDB out of {len(missing_values)}")
+    insert_missing_logins(missing_logins, db)
 
-    return Response(code=200, data={}, success=True)
+    return JSONResponse(content={"message": "Missing records processed successfully."})
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="127.0.0.1", port=5000)

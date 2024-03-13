@@ -1,70 +1,21 @@
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
 import pytz
-import uvicorn
-import logging
-logging.basicConfig(filename='app.log', level=logging.INFO)
+
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-db = client["cymmetri-datascience"]
-app = FastAPI()
+db = client['cymmetri-datascience']
+recon_report_metadata = db["reconReportMetadata"]
 
+def get_indian_time():
+    tz = pytz.timezone('Asia/Kolkata')
+    return datetime.now(tz)
 
-def check_app_overdue(app_ids, Cymmetri_Logins):
-        current_utc_time = datetime.utcnow()
-        matching_users = []
-        messages = []
-
-        for app_id in app_ids:
-            for cymmetri_login in Cymmetri_Logins:
-                users = db.user.find({
-                    "end_date": {"$exists": True, "$lt": current_utc_time},
-                    "status": "ACTIVE",
-                    f"provisionedApps.{app_id}.login.login": cymmetri_login
-                })
-                matching_users.extend(users)
-
-        for user in matching_users:
-            user_id = str(user["_id"])
-            display_name = user.get("displayName", "N/A")
-            end_date = user.get("end_date", "N/A")
-            for app_id, app_details in user.get("provisionedApps", {}).items():
-                app_login = app_details.get("login", {}).get("login", "N/A")
-                app_status = app_details.get("login", {}).get("status", "N/A")
-
-                if app_status != "SUCCESS_DELETE" or "SUCCESS_UPDATE":
-                    message = (f"User ID: {user_id}, Display Name: {display_name}, "
-                            f"App ID: {app_id}, App Status: {app_status}, "
-                            f"Cymmetri Status: {user['status']}, "
-                            f"End Date: {end_date}, Current Date: {current_utc_time}")
-                    messages.append(message)
-
-        # Print each message only once
-        for message in messages:
-            print("Break Type:: App_Ovedue")
-            print(message)
-
-
-@app.post("/missing_records")
-async def missing_records(db_name: str = Header("cymmetri-datascience")):
-    # Function to connect to the MongoDB client and return the specified database
-    def connect_to_db(db_name):
-        client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-        return client[db_name]
-
-    # Function to get Indian time
-    def get_indian_time():
-        tz = pytz.timezone('Asia/Kolkata')
-        return datetime.now(tz)
-
+def missing_records(db):
     # Function to fetch logins excluding CYMMETRI
-    # Function to fetch logins excluding CYMMETRI
-    def fetch_logins_exclude_cymmetri(db):
-        # Initialize an empty set to store unique Cymmetri logins
-        cymmetri_logins = set()
-        app_ids = []
+    def fetch_logins_exclude_cymmetri():
+        # Initialize an empty list to store Cymmetri logins
+        cymmetri_logins = []
 
         # Fetch reconciliationId from reconReportMetadata collection
         recon_metadata_collection = db['reconReportMetadata']
@@ -89,7 +40,7 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
             for doc in matching_docs:
                 appId = doc['applicationId']
                 if appId != "CYMMETRI":
-                    app_ids.append(appId)
+                    print("appID:", appId)
 
                     # Find user document with the given applicationId where login.login exists
                     user_docs = user_collection.find({"provisionedApps." + appId + ".login.login": {"$exists": True}})
@@ -98,22 +49,14 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                     for user_doc in user_docs:
                         # Extract login.login value
                         login_login = user_doc["provisionedApps"][appId]["login"]["login"]
-                        # Add the login to the set
-                        cymmetri_logins.add(login_login)
+                        cymmetri_logins.append(login_login)
 
-        # Convert the set to a list before returning
-        cymmetri_logins_list = list(cymmetri_logins)
         # Print the list of login.logins values
-        logging.info("Cymmetri Logins: %s", cymmetri_logins_list)
-        check_app_overdue(app_ids, cymmetri_logins_list)
-        
-        # Return the cymmetri_logins_list
-        return cymmetri_logins_list
-
-
+        print("Cymmetri Logins:", cymmetri_logins)
+        return cymmetri_logins
 
     # Function to fetch matching records
-    def fetch_matching_records(db):
+    def fetch_matching_records():
         # Initialize an empty list to store matching records
         matching_records = []
         target_logins = []
@@ -140,14 +83,14 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                 matching_records.append(sync_data_doc)
                 # Fetch data.login value and store it in target_logins list
                 target_logins.append(sync_data_doc['data']['login'])
-        print("Target Logins ",target_logins)
+            print("Traget Logins ",target_logins)
 
         return matching_records, target_logins
 
     # Function to insert missing logins into recon_break_type collection
-    def insert_missing_logins(missing_logins, db):
+    def insert_missing_logins(missing_logins):
         sync_data_collection = db['syncDataForRecon']
-        
+    
         # Accessing recon_break_type collection
         recon_break_type_collection = db['recon_break_type']
         
@@ -157,8 +100,6 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
         # Update break count
         inserted_records_count = 0
         inserted_object_ids = []
-
-        
 
         for index, missing_login in enumerate(missing_logins, start=1):
             # Find the corresponding document in syncDataForRecon collection
@@ -178,7 +119,6 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                     'performedAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
                 }
                 
-                
                 # Insert document into recon_break_type collection
                 result = recon_break_type_collection.insert_one(break_doc)
                 
@@ -188,46 +128,43 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                 # Increment the count of inserted records
                 inserted_records_count += 1
 
-                # Update break count document
-                indian_time = get_indian_time()
-                formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
-
-                break_count_document = {
-                    "status": f"{inserted_records_count} new records inserted",
-                    "performedAt": formatted_indian_time,
-                    "objectIDs": inserted_object_ids,
-                    "breakType": break_doc["breakType"]
-                }
-                break_count_collection.insert_one(break_count_document)
-
             else:
                 print(f"No syncDataForRecon document found for login: {missing_login}")
 
             # Print count of total missing values and count of inserted records
             print(f"Processed {index}/{len(missing_logins)} missing logins. {inserted_records_count} records inserted.")
 
-        # Return success response
-        return JSONResponse(content={"message": "Missing records processed successfully."})
+        # Update break count document
+        indian_time = get_indian_time()
+        formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
 
-    # Connect to the specified database
-    db = connect_to_db(db_name)
+        break_count_document = {
+            "status": f"{inserted_records_count} new records inserted",
+            "performedAt": formatted_indian_time,
+            "objectIDs": inserted_object_ids
+        }
+        break_count_collection.insert_one(break_count_document)
 
     # Call the functions sequentially
-    cymmetri_logins = fetch_logins_exclude_cymmetri(db)
-    matching_records, target_logins = fetch_matching_records(db)
+    cymmetri_logins = fetch_logins_exclude_cymmetri()
+    matching_records, target_logins = fetch_matching_records()
 
     # Calculate missing logins
     missing_logins = set(target_logins) - set(cymmetri_logins)
 
     # Insert missing logins into recon_break_type collection
-    insert_missing_logins(missing_logins, db)
+    insert_missing_logins(missing_logins)
 
-    # Return success response
-    return JSONResponse(content={"message": "Missing records processed successfully."})
+# Call the function with your database connection
+missing_records(db)
+    
+# def watch_recon_report_metadata():
+#     with recon_report_metadata.watch(full_document='updateLookup') as stream:
+#         for change in stream:
+#             print("Change detected in reconReportMetadata collection.")
+#             #print(change)
+#             missing_records(db)
+#             print("change is detected and function has run")
 
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=5000)
-
-
+# if __name__ == "__main__":
+#     watch_recon_report_metadata()

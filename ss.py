@@ -5,46 +5,9 @@ from bson import ObjectId
 from datetime import datetime
 import pytz
 import uvicorn
-import logging
-logging.basicConfig(filename='app.log', level=logging.INFO)
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-db = client["cymmetri-datascience"]
+
 app = FastAPI()
-
-
-def check_app_overdue(app_ids, Cymmetri_Logins):
-        current_utc_time = datetime.utcnow()
-        matching_users = []
-        messages = []
-
-        for app_id in app_ids:
-            for cymmetri_login in Cymmetri_Logins:
-                users = db.user.find({
-                    "end_date": {"$exists": True, "$lt": current_utc_time},
-                    "status": "ACTIVE",
-                    f"provisionedApps.{app_id}.login.login": cymmetri_login
-                })
-                matching_users.extend(users)
-
-        for user in matching_users:
-            user_id = str(user["_id"])
-            display_name = user.get("displayName", "N/A")
-            end_date = user.get("end_date", "N/A")
-            for app_id, app_details in user.get("provisionedApps", {}).items():
-                app_login = app_details.get("login", {}).get("login", "N/A")
-                app_status = app_details.get("login", {}).get("status", "N/A")
-
-                if app_status != "SUCCESS_DELETE" or "SUCCESS_UPDATE":
-                    message = (f"User ID: {user_id}, Display Name: {display_name}, "
-                            f"App ID: {app_id}, App Status: {app_status}, "
-                            f"Cymmetri Status: {user['status']}, "
-                            f"End Date: {end_date}, Current Date: {current_utc_time}")
-                    messages.append(message)
-
-        # Print each message only once
-        for message in messages:
-            print("Break Type:: App_Ovedue")
-            print(message)
 
 
 @app.post("/missing_records")
@@ -60,11 +23,9 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
         return datetime.now(tz)
 
     # Function to fetch logins excluding CYMMETRI
-    # Function to fetch logins excluding CYMMETRI
     def fetch_logins_exclude_cymmetri(db):
         # Initialize an empty set to store unique Cymmetri logins
         cymmetri_logins = set()
-        app_ids = []
 
         # Fetch reconciliationId from reconReportMetadata collection
         recon_metadata_collection = db['reconReportMetadata']
@@ -89,7 +50,7 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
             for doc in matching_docs:
                 appId = doc['applicationId']
                 if appId != "CYMMETRI":
-                    app_ids.append(appId)
+                    print("appID:", appId)
 
                     # Find user document with the given applicationId where login.login exists
                     user_docs = user_collection.find({"provisionedApps." + appId + ".login.login": {"$exists": True}})
@@ -104,12 +65,8 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
         # Convert the set to a list before returning
         cymmetri_logins_list = list(cymmetri_logins)
         # Print the list of login.logins values
-        logging.info("Cymmetri Logins: %s", cymmetri_logins_list)
-        check_app_overdue(app_ids, cymmetri_logins_list)
-        
-        # Return the cymmetri_logins_list
+        print("Cymmetri Logins:", cymmetri_logins_list)
         return cymmetri_logins_list
-
 
 
     # Function to fetch matching records
@@ -140,7 +97,7 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                 matching_records.append(sync_data_doc)
                 # Fetch data.login value and store it in target_logins list
                 target_logins.append(sync_data_doc['data']['login'])
-        print("Target Logins ",target_logins)
+            print("Target Logins ",target_logins)
 
         return matching_records, target_logins
 

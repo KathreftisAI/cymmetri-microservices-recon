@@ -15,15 +15,24 @@ def get_indian_time():
     tz = pytz.timezone('Asia/Kolkata')
     return datetime.now(tz)
 
-# MongoDB connection
+# MongoDB connection for newqa-recontestsahil
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-db = client['newqa-recontestsahil'] 
+# db = client['newqa-recontestsahil'] 
+# user_collection = db["user"]
+# reconciliationPull = db["reconciliationPull"]
+# syncData = db["syncData"]
+# break_count = db["break_count"]
+# recon_break_type = db["recon_break_type"]
+# recon_report_metadata = db["reconReportMetadata"]
+
+#Mongo db connection for cymmetri-datascience
+db = client["cymmetri-datascience"]
 user_collection = db["user"]
 reconciliationPull = db["reconciliationPull"]
-syncData = db["syncData"]
+syncData = db["syncDataForRecon"]
 break_count = db["break_count"]
 recon_break_type = db["recon_break_type"]
-recon_report_metadata = db["recon_report_metadata"]
+recon_report_metadata = db["reconReportMetadata"]
 
 app = FastAPI()
 
@@ -131,23 +140,28 @@ def process_missing_values():
 def watch_recon_report_metadata():
     with recon_report_metadata.watch(full_document='updateLookup') as stream:
         for change in stream:
-            logging.info("Change detected in reconReportMetadata collection.")
-            process_missing_values()
+            print("Change detected in reconReportMetadata collection.")
+            print(change)
+            #process_missing_values()
+            print("change is detected and function has run")
 
 # FastAPI endpoint (just for example)
-@app.get("/")
-async def read_root():
-    return {"message": "FastAPI is running."}
+# @app.get("/")
+# async def read_root():
+#     return {"message": "FastAPI is running."}
 
-# Start the MongoDB change stream in a background task
-import asyncio
-from fastapi import BackgroundTasks
+# # Start the MongoDB change stream in a background task
+# import asyncio
+# from fastapi import BackgroundTasks
 
-@app.on_event("startup")
-async def startup_event():
-    background_tasks = BackgroundTasks()
-    background_tasks.add_task(watch_recon_report_metadata)
+# @app.on_event("startup")
+# async def startup_event():
+#     background_tasks = BackgroundTasks()
+#     background_tasks.add_task(watch_recon_report_metadata)
 
+# if __name__ == "__main__":
+#     # Start the FastAPI application
+#     uvicorn.run(app, host="127.0.0.1", port=8000)
+            
 if __name__ == "__main__":
-    # Start the FastAPI application
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    watch_recon_report_metadata()
