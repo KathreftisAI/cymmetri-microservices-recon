@@ -51,7 +51,7 @@ def check_app_overdue(app_ids, cymmetri_logins):
 
     # Print each message only once
     for message in messages:
-        print("Break Type:: App_Overdue")
+        print("breakType:: App_Overdue")
         print(message)
 
 
@@ -122,21 +122,29 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
         return matching_records, target_logins
 
     # Function to insert missing logins into recon_break_type collection
-    def insert_missing_logins(missing_logins, db):
+    def insert_missing_logins(missing_logins,db):
         sync_data_collection = db['syncDataForRecon']
+        
+        # Accessing recon_break_type collection
         recon_break_type_collection = db['recon_break_type']
+        
+        # Accessing break_count collection
         break_count_collection = db['breakReportMetadata']
 
+        # Update break count
         inserted_records_count = 0
         inserted_object_ids = []
 
         for index, missing_login in enumerate(missing_logins, start=1):
+            # Find the corresponding document in syncDataForRecon collection
             sync_data_doc = sync_data_collection.find_one({'data.login': missing_login})
-
+            
             if sync_data_doc:
+                # Extract batchId and reconciliationId
                 batch_id = sync_data_doc.get('batchId')
                 reconciliation_id = sync_data_doc.get('reconciliationId')
-
+                
+                # Create document to insert into recon_break_type collection
                 break_doc = {
                     'batchId': batch_id,
                     'reconciliationId': reconciliation_id,
@@ -144,28 +152,33 @@ async def missing_records(db_name: str = Header("cymmetri-datascience")):
                     'breakType': 'Account created outside Cymmetri',
                     'performedAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
                 }
-
+                
+                # Insert document into recon_break_type collection
                 result = recon_break_type_collection.insert_one(break_doc)
+                
+                # Store the inserted object ID
                 inserted_object_ids.append(result.inserted_id)
+                
+                # Increment the count of inserted records
                 inserted_records_count += 1
-
-                indian_time = get_indian_time()
-                formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
-
-                break_count_document = {
-                    "status": f"{inserted_records_count} new records inserted",
-                    "performedAt": formatted_indian_time,
-                    "objectIDs": inserted_object_ids,
-                    "breakType": break_doc["breakType"]
-                }
-                break_count_collection.insert_one(break_count_document)
 
             else:
                 print(f"No syncDataForRecon document found for login: {missing_login}")
 
+            # Print count of total missing values and count of inserted records
             print(f"Processed {index}/{len(missing_logins)} missing logins. {inserted_records_count} records inserted.")
 
-        return JSONResponse(content={"message": "Missing records processed successfully."})
+        # Update break count document
+        indian_time = get_indian_time()
+        formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
+
+        break_count_document = {
+            "status": f"{inserted_records_count} new records inserted",
+            "performedAt": formatted_indian_time,
+            "objectIDs": [{"$oid": str(oid)} for oid in inserted_object_ids]  # Convert ObjectIDs to the desired format
+        }
+        break_count_collection.insert_one(break_count_document)
+
 
     db = connect_to_db(db_name)
     app_ids, cymmetri_logins = fetch_logins_exclude_cymmetri(db)

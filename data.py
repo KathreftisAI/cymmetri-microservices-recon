@@ -3,7 +3,7 @@ import time
 
 # Connect to MongoDB
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-db = client['cymmetri-datascience']  # Replace 'cymmetri-datasceice' with your actual database name
+db = client['cymmetri-datascience']
 
 def fetch_recon_report_metadata():
     # Fetch the latest record from reconReportMetadata collection
