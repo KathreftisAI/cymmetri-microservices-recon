@@ -1,3 +1,8 @@
 MONGODB_CONNECTION_STRING: "mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority"
 CYMMETRI_DB_PREFIX: newqa-
 BASE_PREFIX: /reconsrvc
+REDIS_HOST: 10.0.1.7
+REDIS_PORT: 6379
+REDIS_USERNAME: infra
+REDIS_PASSWORD: infra@123
+REDIS_DATABASE: 1

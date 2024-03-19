@@ -1,167 +1,154 @@
-from fastapi import FastAPI, HTTPException, Header
-from pymongo import MongoClient
 from bson import ObjectId
-from datetime import datetime
-import uvicorn
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import logging
-from database.connection import get_collection
+from pymongo import MongoClient
+import datetime
+import redis
 from config.loader import Configuration
 import platform
-import pytz
+import logging
 
-def get_indian_time():
-    tz = pytz.timezone('Asia/Kolkata')
-    return datetime.now(tz)
-
-# MongoDB connection for newqa-recontestsahil
+# MongoDB client initialization
 client = MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
-# db = client['newqa-recontestsahil'] 
-# user_collection = db["user"]
-# reconciliationPull = db["reconciliationPull"]
-# syncData = db["syncData"]
-# break_count = db["break_count"]
-# recon_break_type = db["recon_break_type"]
-# recon_report_metadata = db["reconReportMetadata"]
-
-#Mongo db connection for cymmetri-datascience
 db = client["cymmetri-datascience"]
-user_collection = db["user"]
+reconReportMetadata = db["reconReportMetadata"]
 reconciliationPull = db["reconciliationPull"]
-syncData = db["syncDataForRecon"]
-break_count = db["break_count"]
-recon_break_type = db["recon_break_type"]
-recon_report_metadata = db["reconReportMetadata"]
+applicationTenant = db["applicationTenant"]
+userCollection = db["user"]
 
-app = FastAPI()
+# Global variables
+current_utc_time = datetime.datetime.utcnow()
+redis_client = None
 
-def get_distinct_app_ids():
-    pipeline = [
-        {"$project": {"provisionedApps": {"$objectToArray": "$provisionedApps"}}},
-        {"$unwind": "$provisionedApps"},
-        {"$match": {"provisionedApps.k": {"$ne": "CYMMETRI"}}},  
-        {"$group": {"_id": "$provisionedApps.k"}}
-    ]
-    distinct_apps_user = user_collection.aggregate(pipeline)
-    return [app['_id'] for app in distinct_apps_user]
+# Function to get Redis connection
+def get_redis_connection():
+    global redis_client
+    if redis_client is None:
+        if platform.system() == 'Windows':
+            config_path = "config.yaml"
+        else:
+            config_path = "/config/config.yaml"
+        c = Configuration(config_path)
+        data = c.getConfiguration()
 
-def process_missing_values():
-    distinct_app_ids_user = get_distinct_app_ids()
+        host = data["REDIS_HOST"]
+        port = data["REDIS_PORT"]
+        username = data["REDIS_USERNAME"]
+        password = data["REDIS_PASSWORD"]
+        database = data["REDIS_DATABASE"]
 
-    matching_records_dict = {}
-    user_type_ids_set = set()
-    user_type_count = {}
-    batch_ids_info = {}
-    distinct_logins_target = set()
-    distinct_logins_from_user = set()
-    missing_values_details = []
-    missing_login_list = []
-    formatted_indian_time = None
+        conn_pool = redis.ConnectionPool(host=host, port=port, db=database, username=username, password=password)
+        redis_client = redis.Redis(connection_pool=conn_pool)
 
-    for app_id in distinct_app_ids_user:
-        matching_records = reconciliationPull.find({"applicationId": app_id})
-        matching_records_dict[app_id] = [record for record in matching_records] 
+    return redis_client
 
-        matching_records = reconciliationPull.find({"applicationId": app_id})
-        user_type_ids_set.update(str(record.get('_id')) for record in matching_records if record.get('type') == 'USER')
+# Function to process a new document
+def process_new_document(document):
+    # Redis connection
+    redis_conn = get_redis_connection()
 
-        for user_type_id in user_type_ids_set:
-            matching_sync_data = syncData.find({"reconciliationId": user_type_id})
-            count = sum(1 for _ in matching_sync_data)
-            user_type_count[str(user_type_id)] = count
+    # Extracting _id, recon_id, and batch_id
+    id_value = str(document["_id"])
+    recon_id_value = document["reconciliationId"]
+    batch_id_value = document["batchId"]
 
-        for user_type_id in user_type_ids_set:
-            matching_sync_data = syncData.find({"reconciliationId": user_type_id})
-            latest_created_datetime, latest_batch_id = None, None
-            for sync_record in matching_sync_data:
-                if latest_created_datetime is None or sync_record.get('createdDateTime') > latest_created_datetime:
-                    latest_created_datetime = sync_record.get('createdDateTime')
-                    latest_batch_id = sync_record.get('batchId')
-            batch_ids_info[str(user_type_id)] = {'latest_batch_id': latest_batch_id, 'latest_created_datetime': latest_created_datetime}
+    # Printing values
+    print("reconReportMetadata_id:", id_value)
+    print("recon_id:", recon_id_value)
+    print("batch_id:", batch_id_value)
 
-        for user_type_id, info in batch_ids_info.items():
-            latest_batch_id = info['latest_batch_id']
-            matching_records = syncData.find({"batchId": latest_batch_id}, {"data.login": 1})
-            distinct_logins_target.update(record.get("data", {}).get("login") for record in matching_records)
+    # Fetching applicationId from reconciliationPull collection
+    reconciliation_doc = reconciliationPull.find_one({"_id": ObjectId(recon_id_value)})
+    if reconciliation_doc:
+        application_id = reconciliation_doc.get("applicationId")
+        print("applicationId:", application_id)
 
-        for app_id in distinct_app_ids_user:
-            matching_records = user_collection.find({"provisionedApps.{}.login.login".format(app_id): {"$exists": True}}, {"provisionedApps.{}.login.login".format(app_id): 1})
-            distinct_logins_from_user.update(record.get("provisionedApps", {}).get(app_id, {}).get("login", {}).get("login") for record in matching_records)
+        # Fetching displayName from applicationTenant collection
+        application_tenant_doc = applicationTenant.find_one({"_id": ObjectId(application_id)})
+        if application_tenant_doc:
+            display_name = application_tenant_doc.get("settings", {}).get("displayName")
+            print("ApplicationName", display_name)
 
-    missing_values = distinct_logins_target - distinct_logins_from_user
-
-    inserted_records_count = 0
-    inserted_object_ids = []
-
-    for missing_login in missing_values:
-        matching_records_sync_data = syncData.find({"data.login": missing_login})
-        for sync_record in matching_records_sync_data:
-            sync_data_details = {
-                "batchId": sync_record.get("batchId"),
-                "reconciliationId": sync_record.get("reconciliationId"),
-                "loginId": missing_login,
-                "breakType": "Account created outside Cymmetri",
-                "performedAt": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
-            }
-            matching_record_reconciliation_pull = reconciliationPull.find_one({"_id": ObjectId(sync_record.get("reconciliationId"))})
-            if matching_record_reconciliation_pull:
-                sync_data_details["applicationId"] = matching_record_reconciliation_pull.get("applicationId")
-                missing_values_details.append(sync_data_details)
-
-        for record in missing_values_details:
-            criteria = {
-                "breakType": record["breakType"],
-                "loginId": record["loginId"],
-                "applicationId": record["applicationId"],
-                "reconciliationId": record["reconciliationId"]
-            }
-
-            update_operation = {
-                "$set": {"performedAt": record["performedAt"]}
-            }
-
-            result = recon_break_type.update_one(criteria, update_operation, upsert=True)
-
-            if result.matched_count == 0:
-                inserted_records_count += 1
-                inserted_object_ids.append(result.upserted_id)
-
-        indian_time = get_indian_time()
-        formatted_indian_time = indian_time.strftime('%Y-%m-%d %H:%M:%S %Z%z')
-
-    break_count_document = {
-        "status": f"{inserted_records_count} new records inserted",
-        "performedAt": formatted_indian_time,
-        "objectIDs": inserted_object_ids
-    }
-    break_count.insert_one(break_count_document)
-
-def watch_recon_report_metadata():
-    with recon_report_metadata.watch(full_document='updateLookup') as stream:
-        for change in stream:
-            print("Change detected in reconReportMetadata collection.")
-            print(change)
-            #process_missing_values()
-            print("change is detected and function has run")
-
-# FastAPI endpoint (just for example)
-# @app.get("/")
-# async def read_root():
-#     return {"message": "FastAPI is running."}
-
-# # Start the MongoDB change stream in a background task
-# import asyncio
-# from fastapi import BackgroundTasks
-
-# @app.on_event("startup")
-# async def startup_event():
-#     background_tasks = BackgroundTasks()
-#     background_tasks.add_task(watch_recon_report_metadata)
-
-# if __name__ == "__main__":
-#     # Start the FastAPI application
-#     uvicorn.run(app, host="127.0.0.1", port=8000)
+            # Fetching logins from user collection
+            logins = []
+            users = []
+            app_overdue = []
+            final_app_overdue = []
+            user_docs = userCollection.find({"provisionedApps.{}.login.login".format(application_id): {"$exists": True}})
+            for user_doc in user_docs:
+                login = user_doc["provisionedApps"][application_id]["login"]["login"]
+                logins.append(login)
+                users.append(user_doc)
             
-if __name__ == "__main__":
-    watch_recon_report_metadata()
+            for user in users:
+                # Check if user["provisionedApps"] is a dictionary
+                if isinstance(user["provisionedApps"], dict):
+                    # Check if applicationId exists in provisionedApps
+                    if application_id in user["provisionedApps"]:
+                        # Check the conditions for the user
+                        if "end_date" in user and user["end_date"] < current_utc_time and \
+                        user["status"] == "ACTIVE" and \
+                        user["provisionedApps"][application_id]["login"]["status"] not in ["SUCCESS_DELETE", "SUCCESS_UPDATE"]:
+                                app_overdue.append(user)
+                        else:
+                            print("No App_Overdue Found")
+            for user in app_overdue:
+                # Extracting desired attributes from each user
+                user_data = {
+                    "cymmetriLogin": user["provisionedApps"]["CYMMETRI"]["login"]["login"],
+                    "appLogin": user["provisionedApps"][application_id]["login"]["login"],
+                    "status": user["status"],
+                    "appStatus": user["provisionedApps"][application_id]["login"]["status"],
+                    "end_date": user.get("end_date", None)
+                }
+                final_app_overdue.append(user_data)
+            print("Cymmetri_logins:", logins)
+            print("users:", users)
+            print(len(users))
+            print("app_overdue", app_overdue)
+            print(len(app_overdue))
+            print("final_app_overdue:", final_app_overdue)
+
+            # Store data in Redis
+            success = store_in_redis(id_value, display_name, application_id, logins, final_app_overdue)
+            if success:
+                print("Data inserted into Redis successfully!")
+            else:
+                print("Failed to insert data into Redis.")
+            
+        else:
+            print("Application not found in applicationTenant collection")
+    else:
+        print("reconciliationId not found in reconciliationPull collection")
+
+# Function to store data in Redis
+def store_in_redis(recon_report_metadata_id, app_name, app_id, logins, final_app_overdue):
+    try:
+        # Redis connection
+        redis_conn = get_redis_connection()
+
+        # Static Redis key
+        redis_key = "cymmetri-datascience_sh_recon_65f16ea71eea4028c1fa4c32_f595e9a3-77dd-476a-a424-3336552e3bac"
+
+        # Convert end_date to string representation in final_app_overdue
+        for user_data in final_app_overdue:
+            if "end_date" in user_data and user_data["end_date"] is not None:
+                user_data["end_date"] = user_data["end_date"].isoformat()
+
+        # Storing data in Redis
+        redis_conn.hset(redis_key, "reconReportMetadataId", recon_report_metadata_id)
+        redis_conn.hset(redis_key, "appName", app_name)
+        redis_conn.hset(redis_key, "appId", app_id)
+        redis_conn.hset(redis_key, "Cymmetri_logins", str(logins))
+        redis_conn.hset(redis_key, "final_app_overdue", str(final_app_overdue))
+
+        return True
+    except Exception as e:
+        print("Error inserting data into Redis:", str(e))
+        return False
+
+
+# Watch the collection for changes
+with reconReportMetadata.watch(full_document='updateLookup') as stream:
+    for change in stream:
+        if change["operationType"] == "insert":
+            new_document = change["fullDocument"]
+            process_new_document(new_document)
