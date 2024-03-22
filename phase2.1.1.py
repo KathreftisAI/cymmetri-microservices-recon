@@ -3,6 +3,7 @@ import json
 import redis
 from datetime import datetime
 
+
 # Redis configurations
 REDIS_HOST = '10.0.1.7'
 REDIS_PORT = 6379
@@ -10,8 +11,9 @@ REDIS_USERNAME = 'infra'
 REDIS_PASSWORD = 'infra@123'
 REDIS_DATABASE = 1
 
+
 # Key for Redis hashmap
-redis_key = '65fc04ae60643f5a285a06c6'
+redis_key = '65f8430941fd647553ffbcea'
 
 redis_client = redis.StrictRedis(host=REDIS_HOST,
                                  port=REDIS_PORT,
@@ -20,29 +22,37 @@ redis_client = redis.StrictRedis(host=REDIS_HOST,
                                  db=REDIS_DATABASE,
                                  decode_responses=True)
 
+
+
+
+
 # Connect to MongoDB
 client = pymongo.MongoClient("mongodb://unoadmin:devDb123@10.0.1.6:27019,10.0.1.6:27020,10.0.1.6:27021/?authSource=admin&replicaSet=sso-rs&retryWrites=true&w=majority")
 db = client["cymmetri-datascience"]
 syncDataForRecon = db["syncDataForRecon"]
 shRecordCymmetriAppLogins = db["shRecordCymmetriAppLogins"]
 
-key = 'cymmetri-datascience_sh_recon_65fc04ae60643f5a285a06c6_3d660aa5-4eae-427b-bcb7-5792e9f90b77'
+
+key = 'cymmetri-datascience_sh_recon_65f8430941fd647553ffbcea_f699c7a0-a744-4f14-8272-6aecf7a66b8d'
 recon_report_metadata_id = redis_client.hget(key, 'reconReportMetadataId')
-reconciliationId = redis_client.hget(key, "reconciliationId")
+reconciliationId = redis_client.hget(key,"reconciliationId")
 batch_id = redis_client.hget(key, 'batchId')
 
 # Print the values
 print("reconReportMetadataId:", recon_report_metadata_id)
 print("batchId:", batch_id)
-print("reconciliationId", reconciliationId)
+print("reconciliationId",reconciliationId)
+
 
 # Initialize sets to store Reconciliation IDs and Logins
 reconciliation_ids = set()
 Target_logins = set()
 
-# Set reconReportMetadataId and batch_id
 reconReportMetadataId = recon_report_metadata_id
 batch_id = batch_id
+
+
+
 
 # Set up the change stream to watch for new insertions
 with syncDataForRecon.watch(full_document='updateLookup') as stream:
@@ -66,6 +76,9 @@ with syncDataForRecon.watch(full_document='updateLookup') as stream:
                 # Store serialized JSON in Redis
                 redis_client.set(redis_key, target_logins_json)
 
+
+
+
                 for login in target_logins_list:
                     existing_document = shRecordCymmetriAppLogins.find_one({"Target_logins": login})
                     if existing_document:
@@ -84,12 +97,17 @@ with syncDataForRecon.watch(full_document='updateLookup') as stream:
                             reconciliation_ids_str = ','.join(reconciliation_ids)
                             shRecordCymmetriAppLogins.update_one({"_id": existing_document["_id"]}, {"$set": {"reconciliation_ids": reconciliation_ids_str}})
                     else:
+                        # Get the syncDataForRecon _id based on the login
+                        sync_data_document = syncDataForRecon.find_one({"data.login": login})
+                        sync_data_recon_id = sync_data_document.get("_id") if sync_data_document else None
+                        
                         # Insert a new document
                         data_to_insert = {
                             "reconciliation_ids": [reconciliationId],  # Store reconciliationId directly as a string
                             "batch_id": batch_id,
                             "reconReportMetadataId": recon_report_metadata_id,
                             "Target_logins": login,
-                            "created": datetime.now()
+                            "created": datetime.now(),
+                            "syncdataReconId": sync_data_recon_id  # Add the syncdataReconId field
                         }
                         shRecordCymmetriAppLogins.insert_one(data_to_insert)

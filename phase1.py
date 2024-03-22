@@ -111,7 +111,7 @@ def process_new_document(document):
             print("final_app_overdue:", final_app_overdue)
 
             # Store final_app_overdue and other data in Redis
-            success = store_in_redis(redis_key, final_app_overdue, logins, id_value, display_name, application_id)
+            success = store_in_redis(redis_key, final_app_overdue, logins, id_value, display_name, application_id,batch_id_value,recon_id_value)
             if success:
                 print("Data inserted into Redis successfully!")
             else:
@@ -125,7 +125,7 @@ def process_new_document(document):
 # Function to store final_app_overdue and other data in Redis
 
 # Function to store final_app_overdue and other data in Redis
-def store_in_redis(redis_key, final_app_overdue, logins, id_value, display_name, application_id):
+def store_in_redis(redis_key, final_app_overdue, logins, id_value, display_name, application_id,batch_id_value,recon_id_value):
     try:
         # Redis connection
         redis_conn = get_redis_connection()
@@ -145,6 +145,8 @@ def store_in_redis(redis_key, final_app_overdue, logins, id_value, display_name,
         redis_conn.hset(redis_key, "reconReportMetadataId", id_value)
         redis_conn.hset(redis_key, "appName", display_name)
         redis_conn.hset(redis_key, "appId", application_id)
+        redis_conn.hset(redis_key,"batchId",batch_id_value)
+        redis_conn.hset(redis_key,"reconciliationId",recon_id_value)
 
         return True
 
